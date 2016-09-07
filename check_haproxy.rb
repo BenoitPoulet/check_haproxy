@@ -65,7 +65,11 @@ op = OptionParser.new do |opts|
     # allows https with invalid certificate on ruby 1.8+
     #
     # src: also://snippets.aktagon.com/snippets/370-hack-for-using-openuri-with-ssl
+    # OpenSSL::SSL::VERIFY_PEER = OpenSSL::SSL::VERIFY_NONE
+    original_verbose = $VERBOSE
+    $VERBOSE = nil
     OpenSSL::SSL::VERIFY_PEER = OpenSSL::SSL::VERIFY_NONE
+    $VERBOSE = original_verbose
   end
 
   opts.on( '--http-error-critical', 'Throw critical when connection to HAProxy is refused or returns error code' ) do
@@ -111,10 +115,21 @@ begin
   f = open(options.url, :http_basic_authentication => [options.user, options.password])
 rescue OpenURI::HTTPError => e
   puts "ERROR: #{e.message}"
-  http_error_critical ? exit CRITICAL : exit UNKNOWN
+#  http_error_critical ? exit CRITICAL : exit UNKNOWN
+    if http_error_critical == true
+        exit CRITICAL
+    else
+        exit UNKNOWN
+    end
 rescue Errno::ECONNREFUSED => e
   puts "ERROR: #{e.message}"
-  http_error_critical ? exit CRITICAL : exit UNKNOWN
+  #  http_error_critical ? exit CRITICAL : exit UNKNOWN
+  if http_error_critical == true
+      exit CRITICAL
+  else
+      exit UNKNOWN
+  end
+
 rescue Exception => e
   if e.message =~ /redirection forbidden/
     options.url = e.message.gsub(/.*-> (.*)/, '\1')  # extract redirect URL
@@ -169,9 +184,11 @@ f.each do |line|
       exit_code = WARNING if exit_code == OK || exit_code == UNKNOWN
     end
 
-    if row['status'] != 'OPEN' && row['status'] != 'UP'
+#    if row['status'] != 'OPEN' && row['status'] != 'UP'
+    # If a FRONTEND is down (and only), it's only a warning
+    if row['status'] == 'DOWN'
       @errors << message
-      exit_code = CRITICAL
+      exit_code = WARNING
     end
 
   elsif row['svname'] == 'BACKEND'
@@ -190,9 +207,11 @@ f.each do |line|
   elsif row['status'] != 'no check'
     @proxies << message
 
-    if row['status'] != 'UP'
+    # if row['status'] != 'UP'
+    if row['status'] == 'DOWN'
       @errors << message
-      exit_code = WARNING if exit_code == OK || exit_code == UNKNOWN
+    #   exit_code = WARNING if exit_code == OK || exit_code == UNKNOWN
+      exit_code = CRITICAL
     else
       if row['slim'].to_i == 0
         session_percent_usage = 0
