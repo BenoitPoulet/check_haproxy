@@ -10,17 +10,16 @@ WARNING = 1
 CRITICAL = 2
 UNKNOWN = 3
 
-
 status = ['OK', 'WARN', 'CRIT', 'UNKN']
 
 @proxies = []
 @errors = []
 @perfdata = []
 exit_code = OK
-http_error_critical = false
 
 options = OpenStruct.new
 options.proxies = []
+options.http_error_critical = false
 
 op = OptionParser.new do |opts|
   opts.banner = 'Usage: check_haproxy.rb [options]'
@@ -61,7 +60,6 @@ op = OptionParser.new do |opts|
 
   opts.on( '-k', '--insecure', 'Allow insecure TLS/SSL connections' ) do
     require 'openssl'
-
     # allows https with invalid certificate on ruby 1.8+
     #
     # src: also://snippets.aktagon.com/snippets/370-hack-for-using-openuri-with-ssl
@@ -73,7 +71,11 @@ op = OptionParser.new do |opts|
   end
 
   opts.on( '--http-error-critical', 'Throw critical when connection to HAProxy is refused or returns error code' ) do
-    http_error_critical = true
+    options.http_error_critical = true
+  end
+
+  opts.on( '-m', '--metrics', 'Enable metrics' ) do
+    options.metrics = true
   end
 
   opts.on( '-h', '--help', 'Display this screen' ) do
@@ -115,16 +117,14 @@ begin
   f = open(options.url, :http_basic_authentication => [options.user, options.password])
 rescue OpenURI::HTTPError => e
   puts "ERROR: #{e.message}"
-#  http_error_critical ? exit CRITICAL : exit UNKNOWN
-    if http_error_critical == true
+    if options.http_error_critical == true
         exit CRITICAL
     else
         exit UNKNOWN
     end
 rescue Errno::ECONNREFUSED => e
   puts "ERROR: #{e.message}"
-  #  http_error_critical ? exit CRITICAL : exit UNKNOWN
-  if http_error_critical == true
+  if options.http_error_critical == true
       exit CRITICAL
   else
       exit UNKNOWN
@@ -158,7 +158,9 @@ f.each do |line|
 
   role = row['act'].to_i > 0 ? 'active ' : (row['bck'].to_i > 0 ? 'backup ' : '')
   message = sprintf("%s: %s %s%s", row['pxname'], row['status'], role, row['svname'])
-  perf_id = "#{row['pxname']}".downcase
+  if options.metrics == true
+      perf_id = "#{row['pxname']}".downcase
+  end
 
   if row['svname'] == 'FRONTEND'
     if row['slim'].to_i == 0
@@ -166,8 +168,10 @@ f.each do |line|
     else
       session_percent_usage = row['scur'].to_i * 100 / row['slim'].to_i
     end
-    @perfdata << "#{perf_id}_sessions=#{session_percent_usage}%;#{options.warning ? options.warning : ""};#{options.critical ? options.critical : ""};;"
-    @perfdata << "#{perf_id}_rate=#{row['rate']};;;;#{row['rate_max']}"
+    if options.metrics == true
+        @perfdata << "#{perf_id}_sessions=#{session_percent_usage}%;#{options.warning ? options.warning : ""};#{options.critical ? options.critical : ""};;"
+        @perfdata << "#{perf_id}_rate=#{row['rate']};;;;#{row['rate_max']}"
+    end
     if options.critical && session_percent_usage > options.critical.to_i
       @errors << sprintf("%s has way too many sessions (%s/%s) on %s proxy",
                          row['svname'],
@@ -197,8 +201,10 @@ f.each do |line|
     # So we just collect perfdata. See the following url for more info:
     # http://comments.gmane.org/gmane.comp.web.haproxy/9715
     current_sessions = row['scur'].to_i
-    @perfdata << "#{perf_id}_sessions=#{current_sessions};;;;"
-    @perfdata << "#{perf_id}_rate=#{row['rate']};;;;#{row['rate_max']}"
+    if options.metrics == true
+        @perfdata << "#{perf_id}_sessions=#{current_sessions};;;;"
+        @perfdata << "#{perf_id}_rate=#{row['rate']};;;;#{row['rate_max']}"
+    end
     if row['status'] != 'OPEN' && row['status'] != 'UP'
       @errors << message
       exit_code = CRITICAL
@@ -218,8 +224,10 @@ f.each do |line|
       else
         session_percent_usage = row['scur'].to_i * 100 / row['slim'].to_i
       end
-      @perfdata << "#{perf_id}-#{row['svname']}_sessions=#{session_percent_usage}%;;;;"
-      @perfdata << "#{perf_id}-#{row['svname']}_rate=#{row['rate']};;;;#{row['rate_max']}"
+      if options.metrics == true
+          @perfdata << "#{perf_id}-#{row['svname']}_sessions=#{session_percent_usage}%;;;;"
+          @perfdata << "#{perf_id}-#{row['svname']}_rate=#{row['rate']};;;;#{row['rate_max']}"
+      end
     end
   end
 end
@@ -233,7 +241,12 @@ if @proxies.length == 0
   exit_code = UNKNOWN if exit_code == OK
 end
 
-puts "HAPROXY " + status[exit_code] + ": " + @errors.join('; ') + "|" + @perfdata.join(" ")
+final_string = "HAPROXY " + status[exit_code] + ": " + @errors.join('; ')
+if options.metrics == true
+    final_string =  final_string + "|" + @perfdata.join(" ")
+end
+
+puts final_string
 puts @proxies
 
 exit exit_code
