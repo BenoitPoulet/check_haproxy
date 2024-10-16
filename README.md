@@ -1,8 +1,3 @@
-nagios-checks
-=============
-
-Various Nagios check scripts.
-
 check_haproxy
 -------------
 
@@ -26,17 +21,6 @@ Specific options:
     -h, --help                       Display this screen
  ```
 Example: ```check_haproxy.rb -u "http://demo.1wt.eu/" -w 80 -c 95```
-
-
-check_solr_slave
-----------------
-
-    Usage: check_solr_slave [options]
-    -H, --hostname [hostname]        Host to connect to [localhost]
-    -p, --port [port]                Port to connect to [8983]
-    -w, --warn [minutes]             Threshold for warning [15]
-    -c, --crit [minutes]             Threshold for critical [30]
-    -h, --help                       Display this screen
 
 License
 -------
