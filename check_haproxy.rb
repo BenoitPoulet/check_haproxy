@@ -20,6 +20,8 @@ exit_code = OK
 options = OpenStruct.new
 options.proxies = []
 options.http_error_critical = false
+options.open_timeout = 5
+options.read_timeout = 5
 
 op = OptionParser.new do |opts|
   opts.banner = 'Usage: check_haproxy.rb [options]'
@@ -78,6 +80,14 @@ op = OptionParser.new do |opts|
     options.metrics = true
   end
 
+  opts.on( '-T', '--open-timeout [SECONDS]', Integer, 'Open timeout' ) do |v|
+    options.open_timeout = v
+  end
+
+  opts.on( '-t', '--read-timeout [SECONDS]', Integer, 'Read timeout' ) do |v|
+    options.read_timeout = v
+  end
+
   opts.on( '-h', '--help', 'Display this screen' ) do
     puts opts
     exit 3
@@ -110,11 +120,10 @@ if options.warning && options.critical && options.warning.to_i > options.critica
   exit UNKNOWN
 end
 
-
 tries = 2
 
 begin
-  f = open(options.url, :http_basic_authentication => [options.user, options.password])
+  f = URI.open(options.url, :http_basic_authentication => [options.user, options.password], :read_timeout => options.read_timeout, :open_timeout => options.open_timeout)
 rescue OpenURI::HTTPError => e
   puts "ERROR: #{e.message}"
     if options.http_error_critical == true
@@ -129,17 +138,16 @@ rescue Errno::ECONNREFUSED => e
   else
       exit UNKNOWN
   end
-
 rescue Exception => e
   if e.message =~ /redirection forbidden/
     options.url = e.message.gsub(/.*-> (.*)/, '\1')  # extract redirect URL
     retry if (tries -= 1) > 0
     raise
   else
+    puts "Other error: #{e.message}"
     exit UNKNOWN
   end
 end
-
 
 f.each do |line|
 
@@ -156,8 +164,8 @@ f.each do |line|
   next unless options.proxies.empty? || options.proxies.include?(row['pxname'])
   next if ['statistics', 'admin_stats', 'stats'].include? row['pxname']
 
-  role = row['act'].to_i > 0 ? 'active ' : (row['bck'].to_i > 0 ? 'backup ' : '')
-  message = sprintf("%s: %s %s%s", row['pxname'], row['status'], role, row['svname'])
+  role = row['act'].to_i > 0 ? 'active' : (row['bck'].to_i > 0 ? 'backup' : '')
+  message = sprintf("Proxy: %s - Server: %s, %s, %s", row['pxname'], row['svname'], row['status'], role)
   if options.metrics == true
       perf_id = "#{row['pxname']}".downcase
   end
@@ -188,11 +196,9 @@ f.each do |line|
       exit_code = WARNING if exit_code == OK || exit_code == UNKNOWN
     end
 
-#    if row['status'] != 'OPEN' && row['status'] != 'UP'
-    # If a FRONTEND is down (and only), it's only a warning
-    if row['status'] == 'DOWN'
+    if row['status'] != 'OPEN' && row['status'] != 'UP'
       @errors << message
-      exit_code = WARNING
+      exit_code = CRITICAL
     end
 
   elsif row['svname'] == 'BACKEND'
@@ -205,19 +211,21 @@ f.each do |line|
         @perfdata << "#{perf_id}_sessions=#{current_sessions};;;;"
         @perfdata << "#{perf_id}_rate=#{row['rate']};;;;#{row['rate_max']}"
     end
-    if row['status'] != 'OPEN' && row['status'] != 'UP'
+    # if row['status'] != 'OPEN' && row['status'] != 'UP'
+    # DOWN is the only critical
+    if row['status'] == 'DOWN'
       @errors << message
       exit_code = CRITICAL
     end
 
+# if its not a FRONTEND or BACKEND it must be a Server (if not a no check)
   elsif row['status'] != 'no check'
     @proxies << message
 
     # if row['status'] != 'UP'
     if row['status'] == 'DOWN'
       @errors << message
-    #   exit_code = WARNING if exit_code == OK || exit_code == UNKNOWN
-      exit_code = CRITICAL
+      exit_code = WARNING if exit_code == OK || exit_code == UNKNOWN
     else
       if row['slim'].to_i == 0
         session_percent_usage = 0
@@ -229,7 +237,7 @@ f.each do |line|
           @perfdata << "#{perf_id}-#{row['svname']}_rate=#{row['rate']};;;;#{row['rate_max']}"
       end
     end
-  end
+  end # row['status'] != 'no check'
 end
 
 if @errors.length == 0
@@ -241,7 +249,7 @@ if @proxies.length == 0
   exit_code = UNKNOWN if exit_code == OK
 end
 
-final_string = "HAPROXY " + status[exit_code] + ": " + @errors.join('; ')
+final_string = status[exit_code] + ", " + @errors.join('; ')
 if options.metrics == true
     final_string =  final_string + "|" + @perfdata.join(" ")
 end
