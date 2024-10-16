@@ -7,7 +7,7 @@ check_haproxy
 -------------
 
 Checks haproxy stats and reports errors if any of the servers for a proxy are down.
-
+ ```
     Usage: check_haproxy.rb [options]
 
 Specific options:
@@ -24,7 +24,7 @@ Specific options:
     -T, --open-timeout [SECONDS]     Open timeout
     -t, --read-timeout [SECONDS]     Read timeout
     -h, --help                       Display this screen
-
+ ```
 Example: ```check_haproxy.rb -u "http://demo.1wt.eu/" -w 80 -c 95```
 
 
